@@ -1,6 +1,6 @@
 # @author Nikhil Maserang
 # @email nmaserang@berkeley.edu
-# @version 1.1.0
+# @version 1.2.0
 # @date 2022/10/19
 
 from webbrowser import get
@@ -91,14 +91,18 @@ def reduced_chisq(observed : np.ndarray, predicted : np.ndarray, errors: np.ndar
 
 ### FITTING ###
 
-def unweighted_least_squares_fit(model : callable, x : np.ndarray, y : np.ndarray, initial_parameters : list = None):
+def unweighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, initial_parameters : list = None):
     """
     Performs an unweighted least squares fit for the dataset using the specified `model`.
+    `syms` should contain a list of strings, each of which is a symbol used in the model, starting with the independent variable.
     
     Returns a tuple containing:
     - the optimized parameters
     - the error in those parameters
     """
+    syms = sp.symbols(syms)
+    eqn = sp.sympify(model_str)
+    model = sp.lambdify(syms, eqn, "numpy")
     if initial_parameters:
         optimized_params, param_covariance = opt.curve_fit(model, x, y, p0=initial_parameters)
     else:
@@ -106,14 +110,18 @@ def unweighted_least_squares_fit(model : callable, x : np.ndarray, y : np.ndarra
     param_error = np.sqrt(np.diag(param_covariance))
     return optimized_params, param_error
 
-def weighted_least_squares_fit(model : callable, x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None):
+def weighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None):
     """
     Performs a weighted least squares fit for the dataset using the specified `model`.
+    `syms` should contain a list of strings, each of which is a symbol used in the model, starting with the independent variable.
 
     Returns a tuple containing:
     - the optimized parameters
     - the error in those parameters
     """
+    syms = sp.symbols(syms)
+    eqn = sp.sympify(model_str)
+    model = sp.lambdify(syms, eqn, "numpy")
     if initial_parameters:
         optimized_params, param_covariance = opt.curve_fit(model, x, y, sigma=y_err, absolute_sigma=True, p0=initial_parameters)
     else:
@@ -121,8 +129,13 @@ def weighted_least_squares_fit(model : callable, x : np.ndarray, y : np.ndarray,
     param_error = np.sqrt(np.diag(param_covariance))
     return optimized_params, param_error
 
-def get_predicted(model : callable, x : np.ndarray) -> np.ndarray:
+def get_predicted(model_str : str, syms : list[str], consts : list[str], const_vals : np.ndarray, x : np.ndarray, verbose : bool = False) -> np.ndarray:
     """Returns the predicted values for the independent variable `x` based on the provided `model`."""
+    syms = sp.symbols(syms)
+    consts = sp.symbols(consts)
+    eqn = sp.sympify(model_str).subs(zip(consts, const_vals))
+    if verbose: print(f"Getting predicted values...\n\tModel after substituting in values: {eqn}")
+    model = sp.lambdify(syms, eqn, "numpy")
     return np.ndarray([model(_) for _ in x])
 
 ### MISC UTILS ###
@@ -192,29 +205,30 @@ def plot_residuals(x : np.ndarray, residuals : np.ndarray) -> None:
 ### ERROR PROPAGATION ###
 
 def get_error_propagation(eqn : str, vars : list[str], verbose : bool = False) -> tuple[sp.Pow, sp.Basic, dict, dict]:
+    """Internal! Returns the sympy `err_eqn`, `eqn`, list of `vars`, list of `alphas` (errors)."""
     if verbose: print("Propagating error...")
 
     # first, we make name : symbol dictionaries for the variables and errors (alphas)
     alphas = [f"α_{var}" for var in vars]
-    alphas = {char : sp.symbols(char) for char in alphas}
-    vars = {char : sp.symbols(char) for char in vars}
+    alphas = sp.symbols(alphas)
+    vars = sp.symbols(vars)
     if verbose:
-        print(f"\tvars: {list(vars.keys())}")
-        print(f"\terrs: {list(alphas.keys())}")
+        print(f"\tvars: {vars}")
+        print(f"\terrs: {alphas}")
 
     # use sympify to turn str to sympy expression, passing in symbols as locals
-    eqn = sp.sympify(eqn, locals=vars)
+    eqn = sp.sympify(eqn)
     if verbose: print(f"\teqn: {eqn}")
 
     # compute partials
-    diffs = list(map(eqn.diff, vars.values()))
+    diffs = list(map(eqn.diff, vars))
     if verbose:
         print("\tPartials:")
-        for v, d in zip(vars.keys(), diffs):
+        for v, d in zip(vars, diffs):
             print(f"\t\twrt {v}: {d}")
     
     # multiply by error and square
-    for i in range(len(diffs)): diffs[i] = (list(alphas.values())[i] * diffs[i]) ** 2
+    for i in range(len(diffs)): diffs[i] = (alphas[i] * diffs[i]) ** 2
 
     # sum, then take sqrt
     err_eqn = sp.sqrt(sp.Add(*diffs))
@@ -247,15 +261,12 @@ def calculate_derived_value(eqn : str, vars : list[str], consts : list[str], con
     if verbose: print("Lambdifying and evaluating...")
 
     # evaluate quantity
-    eqn_lambda = sp.lambdify(vars.values(), eqn, "numpy")
+    eqn_lambda = sp.lambdify(vars, eqn, "numpy")
     quantity = np.array(list(map(eqn_lambda, *datasets)))
 
     # add lists together
-    vars_and_errs = list(vars.values()) + list(alphas.values())
+    vars_and_errs = vars + alphas
     vals_and_errs = list(datasets) + list(errors)
-
-    print(vars_and_errs)
-    print(vals_and_errs)
 
     # evaluate quantity error
     err_eqn_lambda = sp.lambdify(vars_and_errs, err_eqn, "numpy")

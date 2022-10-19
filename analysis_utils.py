@@ -1,9 +1,11 @@
 # @author Nikhil Maserang
 # @email nmaserang@berkeley.edu
-# @version 1.0.0
-# @date 2022/09/27
+# @version 1.1.0
+# @date 2022/10/19
 
+from webbrowser import get
 import numpy as np
+import sympy as sp
 import matplotlib.pyplot as plt
 import scipy.optimize as opt
 
@@ -141,32 +143,38 @@ def read_csv_columns(fname : str, datatype=float) -> np.ndarray:
         cols = np.array(lines).transpose()
         return cols
 
-def aggregate_datasets(independent : np.ndarray, dependents : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Aggregates several dependent variable datasets which share the same independent variable."""
-    aggregate_data = []
-    for dataset in dependents:
-        for i, point in enumerate(dataset):
-            aggregate_data.append((independent[i], point))
-    # transpose from points to columns
-    return tuple(map(np.array, list(zip(*aggregate_data))))
+def read_from_docs(fname : str, datatype=float) -> list[np.ndarray]:
+    """Reads file data formatted with linebreaks between datapoints and multiple linebreaks between datasets."""
+    datasets = []
+    current_dataset = []
+    with open(fname, "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            line = line.strip()
+            if len(line) == 0 and len(current_dataset) > 0:
+                datasets.append(np.array(list(map(datatype, current_dataset))))
+                current_dataset = []
+            if len(line) > 0: current_dataset.append(line)
+        if len(current_dataset) > 0: datasets.append(np.array(list(map(datatype, current_dataset))))
+        return datasets
 
-def print_dataset(name : str, data : np.ndarray, errs : np.ndarray, precision : float =None):
+def print_dataset(name : str, values : np.ndarray, errors : np.ndarray, precision : int =None):
     """Prints the values, errors, and mean of a dataset with the provided `precision`. `precision=None` is full precision."""
     print(f"{name} Dataset:")
     if precision == None:
-        for value, error in zip(data, errs):
+        for value, error in zip(values, errors):
             print(f"\t{value} ± {error}")
-        print(f"\t\tMean: {mean(data)}")
-        print(f"\t\tStd : {sample_standard_deviation(data)}")
-        print(f"\t\tSte from values: {standard_error_from_values(data)}")
-        print(f"\t\tSte from errors: {standard_error_from_errors(errs)}")
+        print(f"\t\tMean: {mean(values)}")
+        print(f"\t\tStd : {sample_standard_deviation(values)}")
+        print(f"\t\tSte from values: {standard_error_from_values(values)}")
+        print(f"\t\tSte from errors: {standard_error_from_errors(errors)}")
     else:
-        for value, error in zip(data, errs):
+        for value, error in zip(values, errors):
             print(f"\t{value : .{precision}f} ± {error : .{precision}f}")
-        print(f"\t\tMean: {mean(data) : .{precision}f}")
-        print(f"\t\tStd : {sample_standard_deviation(data) : .{precision}f}")
-        print(f"\t\tSte from values: {standard_error_from_values(data) : .{precision}f}")
-        print(f"\t\tSte from errors: {standard_error_from_errors(errs) : .{precision}f}")
+        print(f"\t\tMean:{mean(values) : .{precision}f}")
+        print(f"\t\tStd :{sample_standard_deviation(values) : .{precision}f}")
+        print(f"\t\tSte from values:{standard_error_from_values(values) : .{precision}f}")
+        print(f"\t\tSte from errors:{standard_error_from_errors(errors) : .{precision}f}")
 
 ### PLOTTING ###
 
@@ -176,7 +184,94 @@ def configure_plt(title : str, xlabel : str, ylabel : str) -> None:
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
 
-def plot_residuals(x : np.ndarray, residuals : np.ndarray):
+def plot_residuals(x : np.ndarray, residuals : np.ndarray) -> None:
     """Plots the residuals of a fit using matplotlib.pyplot."""
     plt.axhline(0, color="red")
     plt.plot(x, residuals, "k .")
+
+### ERROR PROPAGATION ###
+
+def get_error_propagation(eqn : str, vars : list[str], verbose : bool = False) -> tuple[sp.Pow, sp.Basic, dict, dict]:
+    if verbose: print("Propagating error...")
+
+    # first, we make name : symbol dictionaries for the variables and errors (alphas)
+    alphas = [f"α_{var}" for var in vars]
+    alphas = {char : sp.symbols(char) for char in alphas}
+    vars = {char : sp.symbols(char) for char in vars}
+    if verbose:
+        print(f"\tvars: {list(vars.keys())}")
+        print(f"\terrs: {list(alphas.keys())}")
+
+    # use sympify to turn str to sympy expression, passing in symbols as locals
+    eqn = sp.sympify(eqn, locals=vars)
+    if verbose: print(f"\teqn: {eqn}")
+
+    # compute partials
+    diffs = list(map(eqn.diff, vars.values()))
+    if verbose:
+        print("\tPartials:")
+        for v, d in zip(vars.keys(), diffs):
+            print(f"\t\twrt {v}: {d}")
+    
+    # multiply by error and square
+    for i in range(len(diffs)): diffs[i] = (list(alphas.values())[i] * diffs[i]) ** 2
+
+    # sum, then take sqrt
+    err_eqn = sp.sqrt(sp.Add(*diffs))
+    if verbose: print(f"\terr_eqn: {err_eqn}")
+    return err_eqn, eqn, vars, alphas
+
+def get_error_propagation_latex(eqn : str, vars : list[str], verbose : bool = False) -> str:
+    """Returns the error propagation formula for the given expression with given symbols in latex format."""
+    return sp.latex(get_error_propagation(eqn, vars, verbose)[0])
+
+def calculate_derived_value(eqn : str, vars : list[str], consts : list[str], const_vals : np.ndarray, datasets : list[np.ndarray], errors : list[np.ndarray], verbose : bool = False) -> list[np.ndarray, np.ndarray]:
+    """Calculates a derived quantity and its error."""
+    err_eqn, eqn, vars, alphas = get_error_propagation(eqn, vars, verbose)
+
+    # substitute in constant values
+    if verbose: print("Substituting in constants...")
+    consts = sp.symbols(consts)
+    if verbose:
+        print("\tConstants:")
+        for c, cval in zip(consts, const_vals):
+            print(f"\t\t{c} = {cval}")
+    err_eqn = err_eqn.subs(list(zip(consts, const_vals)))
+    eqn = eqn.subs(list(zip(consts, const_vals)))
+
+    if verbose:
+        print("\tAfter substituting:")
+        print(f"\t\teqn    : {eqn}")
+        print(f"\t\terr eqn: {err_eqn}")
+
+    if verbose: print("Lambdifying and evaluating...")
+
+    # evaluate quantity
+    eqn_lambda = sp.lambdify(vars.values(), eqn, "numpy")
+    quantity = np.array(list(map(eqn_lambda, *datasets)))
+
+    # add lists together
+    vars_and_errs = list(vars.values()) + list(alphas.values())
+    vals_and_errs = list(datasets) + list(errors)
+
+    print(vars_and_errs)
+    print(vals_and_errs)
+
+    # evaluate quantity error
+    err_eqn_lambda = sp.lambdify(vars_and_errs, err_eqn, "numpy")
+    quantity_error = np.array(list(map(err_eqn_lambda, *vals_and_errs)))
+
+    if verbose: print("Done!")
+
+    return quantity, quantity_error
+
+### PIPELINE ###
+
+def mean_and_error(values : np.ndarray, errors : np.ndarray = None, precision : int = None):
+    """Returns the mean and associated error of a measurement dataset from raw values and associated errors."""
+    mn = mean(values)
+    stev = standard_error_from_values(values)
+    stee = errors if standard_error_from_errors(errors) else 0
+    ste = max(stev, stee)
+    if precision: return f"{mn : .{precision}f} ± {ste : .{precision}f}"
+    return f"{mn} ± {ste}"

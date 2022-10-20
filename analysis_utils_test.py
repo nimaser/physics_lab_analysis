@@ -1,6 +1,19 @@
+# Copyright 2022 Nikhil Maserang
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along with
+# this program. If not, see <https://www.gnu.org/licenses/>.
+
 # @author Nikhil Maserang
 # @email nmaserang@berkeley.edu
-# @version 1.0.0
+# @version 1.3.0
 # @date 2022/10/19
 
 import analysis_utils as au
@@ -40,7 +53,7 @@ print(pars, pars_err)
 model = "m*x + b"
 syms = ["x"]
 consts = ["m", "b"]
-cvals = [2, 1]
+cvals = [3, 1]
 xdata = np.array([0, 1, 2, 3, 4, 5])
 y = au.get_predicted(model, syms, consts, cvals, xdata, True)
-au.print_dataset()
+au.print_dataset("pred", y, np.full(6, 0.5))

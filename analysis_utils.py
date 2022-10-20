@@ -1,9 +1,21 @@
+# Copyright 2022 Nikhil Maserang
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along with
+# this program. If not, see <https://www.gnu.org/licenses/>.
+
 # @author Nikhil Maserang
 # @email nmaserang@berkeley.edu
-# @version 1.2.0
+# @version 1.3.0
 # @date 2022/10/19
 
-from webbrowser import get
 import numpy as np
 import sympy as sp
 import matplotlib.pyplot as plt
@@ -136,7 +148,7 @@ def get_predicted(model_str : str, syms : list[str], consts : list[str], const_v
     eqn = sp.sympify(model_str).subs(zip(consts, const_vals))
     if verbose: print(f"Getting predicted values...\n\tModel after substituting in values: {eqn}")
     model = sp.lambdify(syms, eqn, "numpy")
-    return np.ndarray([model(_) for _ in x])
+    return np.array([model(_) for _ in x])
 
 ### MISC UTILS ###
 
@@ -156,12 +168,13 @@ def read_csv_columns(fname : str, datatype=float) -> np.ndarray:
         cols = np.array(lines).transpose()
         return cols
 
-def read_from_docs(fname : str, datatype=float) -> list[np.ndarray]:
+def read_from_docs(fname : str, skiprows : int = 0, datatype=float) -> list[np.ndarray]:
     """Reads file data formatted with linebreaks between datapoints and multiple linebreaks between datasets."""
     datasets = []
     current_dataset = []
     with open(fname, "r") as f:
         lines = f.readlines()
+        lines = lines[skiprows:] if skiprows < len(lines) else []
         for line in lines:
             line = line.strip()
             if len(line) == 0 and len(current_dataset) > 0:
@@ -282,7 +295,7 @@ def mean_and_error(values : np.ndarray, errors : np.ndarray = None, precision : 
     """Returns the mean and associated error of a measurement dataset from raw values and associated errors."""
     mn = mean(values)
     stev = standard_error_from_values(values)
-    stee = errors if standard_error_from_errors(errors) else 0
+    stee = standard_error_from_errors(errors) if not errors is None else 0
     ste = max(stev, stee)
     if precision: return f"{mn : .{precision}f} ± {ste : .{precision}f}"
     return f"{mn} ± {ste}"

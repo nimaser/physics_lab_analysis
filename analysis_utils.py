@@ -25,11 +25,11 @@ import scipy.optimize as opt
 
 def ndarray_typecheck(func : callable) -> callable:
     """Decorator to verify that the arguments to a function are all np.ndarrays."""
-    def wrapper(*args):
+    def wrapper(*args, **kwargs):
         for arg in args:
-            err_msg = f"Improper argument type {type(arg)}; need np.ndarray.\nArgument val: {arg}"
+            err_msg = f"Improper argument type for arg {arg=} of type {type(arg)}; need np.ndarray."
             assert type(arg) == np.ndarray, err_msg
-        return func(*args)
+        return func(*args, **kwargs)
     return wrapper
 
 ### DATA ANALYSIS ###
@@ -92,7 +92,7 @@ def chi_squared(observed : np.ndarray, predicted : np.ndarray, errors : np.ndarr
     """Finds the chi squared value for a fit."""
     return np.sum(np.square(normalized_residuals(observed, predicted, errors)))
 
-def reduced_chisq(observed : np.ndarray, predicted : np.ndarray, errors: np.ndarray, num_params : int) -> float:
+def reduced_chisq(observed : np.ndarray, predicted : np.ndarray, errors: np.ndarray, num_params : int = 0) -> float:
     """
     Calculates the reduced chi squared of the dataset.
     
@@ -101,12 +101,22 @@ def reduced_chisq(observed : np.ndarray, predicted : np.ndarray, errors: np.ndar
     """
     return chi_squared(observed, predicted, errors) / (len(observed) - num_params)
 
+def mean_and_error(values : np.ndarray, errors : np.ndarray = None, precision : int = None):
+    """Returns the mean and associated error of a measurement dataset from raw values and associated errors."""
+    mn = mean(values)
+    stev = standard_error_from_values(values)
+    stee = standard_error_from_errors(errors) if not errors is None else 0
+    ste = max(stev, stee)
+    if precision: return f"{mn : .{precision}f} ±{ste : .{precision}f}".strip()
+    return f"{mn} ± {ste}"
+
 ### FITTING ###
 
-def unweighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, initial_parameters : list = None):
+def unweighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, initial_parameters : list = None, plot : bool = True):
     """
     Performs an unweighted least squares fit for the dataset using the specified `model`.
     `syms` should contain a list of strings, each of which is a symbol used in the model, starting with the independent variable.
+    If `plot` is True, it will use pyplot to graph the data and the model function, and plot the residuals.
     
     Returns a tuple containing:
     - the optimized parameters
@@ -122,10 +132,11 @@ def unweighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarr
     param_error = np.sqrt(np.diag(param_covariance))
     return optimized_params, param_error
 
-def weighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None):
+def weighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None, plot : bool = True):
     """
     Performs a weighted least squares fit for the dataset using the specified `model`.
     `syms` should contain a list of strings, each of which is a symbol used in the model, starting with the independent variable.
+    If `plot` is True, it will use pyplot to graph the data and the model function, and plot the residuals.
 
     Returns a tuple containing:
     - the optimized parameters
@@ -168,8 +179,13 @@ def read_csv_columns(fname : str, datatype=float) -> np.ndarray:
         cols = np.array(lines).transpose()
         return cols
 
-def read_from_docs(fname : str, skiprows : int = 0, datatype=float) -> list[np.ndarray]:
-    """Reads file data formatted with linebreaks between datapoints and multiple linebreaks between datasets."""
+def read_from_docs_raw(fname : str, skiprows : int = 0, clip : tuple[int, int] = (0, 0), datatype=str) -> list[np.ndarray]:
+    """
+    Reads file data formatted with linebreaks between datapoints and multiple linebreaks
+    between datasets. Skips the first `skiprows` rows, and removes `clip[0]` characters
+    from the beginning and `clip[1]` characters from the end of each line. Returns a list
+    of datasets.
+    """
     datasets = []
     current_dataset = []
     with open(fname, "r") as f:
@@ -180,11 +196,69 @@ def read_from_docs(fname : str, skiprows : int = 0, datatype=float) -> list[np.n
             if len(line) == 0 and len(current_dataset) > 0:
                 datasets.append(np.array(list(map(datatype, current_dataset))))
                 current_dataset = []
-            if len(line) > 0: current_dataset.append(line)
+            if len(line) > 0:
+                if not (0 <= clip[0] <= len(line) and 0 <= clip[1] <= len(line)) : raise ValueError(f"Clip amount outside of valid line indexes. {line} {len(line)}")
+                line = line[clip[0]:len(line) - clip[1]].replace("Â", "") # UTF-8 to Windows-1252 conversion error correction
+                current_dataset.append(line)
         if len(current_dataset) > 0: datasets.append(np.array(list(map(datatype, current_dataset))))
         return datasets
 
-def print_dataset(name : str, values : np.ndarray, errors : np.ndarray, precision : int =None):
+def split_vals_errors(vals_and_errs : list[str], convert_ndarray : bool = True, datatype=float) -> tuple[list, list]:
+    """
+    Takes in a list of `x ± y` strings and outputs a tuple of two `list`s, one with `x` and one with `y`.
+    If `convert_ndarray` is True, returns a tuple of two `np.ndarray`s.
+    """
+    vals = []
+    errs = []
+    for string in vals_and_errs:
+        val, err = map(lambda s: datatype(s.strip()), string.split('±'))
+        vals.append(val)
+        errs.append(err)
+    if convert_ndarray:
+        vals = np.array(vals)
+        errs = np.array(errs)
+    return vals, errs
+
+def read_from_docs_splitting(fname : str, skiprows : int = 0, clip : tuple[int, int] = (0, 0), datatype=float) -> list[tuple[np.ndarray, np.ndarray]]:
+    """
+    Reads file data formatted with linebreaks between datapoints and multiple linebreaks
+    between datasets. Skips the first `skiprows` rows, and removes `clip[0]` characters
+    from the beginning and `clip[1]` characters from the end of each line. Splits each
+    line (datapoint) into a value and error using `±` as a delimiter.
+
+    Example usage would be:
+    `(LL, LL_err), (RL, RL_err), (LR, LR_err), (RR, RR_err) = au.read_from_docs_splitting("exp2data.txt", 1, (0, 3))`
+    with the following data file:
+    ```
+    L Edge L Max; R Edge L Max; L Edge R Max; R Edge R Max;
+    9.4 ± 0.2 cm
+    9.5 ± 0.2 cm
+    9.6 ± 0.2 cm
+    9.6 ± 0.2 cm
+
+    8.6 ± 0.2 cm
+    8.5 ± 0.2 cm
+    8.6 ± 0.2 cm
+    8.6 ± 0.2 cm
+
+    8.7 ± 0.2 cm
+    8.9 ± 0.2 cm
+    8.7 ± 0.2 cm
+    8.9 ± 0.2 cm
+
+    9.6 ± 0.2 cm
+    9.7 ± 0.2 cm
+    9.7 ± 0.2 cm
+    9.7 ± 0.2 cm
+    ```
+    """
+    raw = read_from_docs_raw(fname, skiprows, clip)
+    out = []
+    for dataset in raw:
+        out.append(split_vals_errors(dataset, True, datatype))
+    return out
+
+def print_dataset(name : str, values : np.ndarray, errors : np.ndarray, precision : int = None) -> None:
     """Prints the values, errors, and mean of a dataset with the provided `precision`. `precision=None` is full precision."""
     print(f"{name} Dataset:")
     if precision == None:
@@ -201,6 +275,16 @@ def print_dataset(name : str, values : np.ndarray, errors : np.ndarray, precisio
         print(f"\t\tStd :{sample_standard_deviation(values) : .{precision}f}")
         print(f"\t\tSte from values:{standard_error_from_values(values) : .{precision}f}")
         print(f"\t\tSte from errors:{standard_error_from_errors(errors) : .{precision}f}")
+
+def print_datasets(names : list[str], datasets : tuple[np.ndarray, np.ndarray], precision : int = None) -> None:
+    """Prints many datasets. Intended for usage on results of `read_from_docs_splitting`."""
+    for name, (values, errors) in zip(names, datasets):
+        print_dataset(name, values, errors, precision)
+
+def print_datasets_mean_and_error(names : list[str], datasets : tuple[np.ndarray, np.ndarray], precision : int = None) -> None:
+    """Prints the mean ± error of many datasets. Intended for usage on results of `read_from_docs_splitting`."""
+    for name, (values, errors) in zip(names, datasets):
+        print(f"{name} Dataset: {mean_and_error(values, errors, precision=precision)}")
 
 ### PLOTTING ###
 
@@ -288,14 +372,3 @@ def calculate_derived_value(eqn : str, vars : list[str], consts : list[str], con
     if verbose: print("Done!")
 
     return quantity, quantity_error
-
-### PIPELINE ###
-
-def mean_and_error(values : np.ndarray, errors : np.ndarray = None, precision : int = None):
-    """Returns the mean and associated error of a measurement dataset from raw values and associated errors."""
-    mn = mean(values)
-    stev = standard_error_from_values(values)
-    stee = standard_error_from_errors(errors) if not errors is None else 0
-    ste = max(stev, stee)
-    if precision: return f"{mn : .{precision}f} ± {ste : .{precision}f}"
-    return f"{mn} ± {ste}"

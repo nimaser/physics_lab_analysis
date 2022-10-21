@@ -13,7 +13,7 @@
 
 # @author Nikhil Maserang
 # @email nmaserang@berkeley.edu
-# @version 1.3.0
+# @version 1.4.0
 # @date 2022/10/19
 
 import numpy as np
@@ -101,14 +101,13 @@ def reduced_chisq(observed : np.ndarray, predicted : np.ndarray, errors: np.ndar
     """
     return chi_squared(observed, predicted, errors) / (len(observed) - num_params)
 
-def mean_and_error(values : np.ndarray, errors : np.ndarray = None, precision : int = None):
+def mean_and_error(values : np.ndarray, errors : np.ndarray = None) -> tuple[float, float]:
     """Returns the mean and associated error of a measurement dataset from raw values and associated errors."""
     mn = mean(values)
     stev = standard_error_from_values(values)
     stee = standard_error_from_errors(errors) if not errors is None else 0
     ste = max(stev, stee)
-    if precision: return f"{mn : .{precision}f} ±{ste : .{precision}f}".strip()
-    return f"{mn} ± {ste}"
+    return mn, ste
 
 ### FITTING ###
 
@@ -270,7 +269,7 @@ def print_dataset(name : str, values : np.ndarray, errors : np.ndarray, precisio
         print(f"\t\tSte from errors: {standard_error_from_errors(errors)}")
     else:
         for value, error in zip(values, errors):
-            print(f"\t{value : .{precision}f} ± {error : .{precision}f}")
+            print(f"\t{value : .{precision}f} ±{error : .{precision}f}")
         print(f"\t\tMean:{mean(values) : .{precision}f}")
         print(f"\t\tStd :{sample_standard_deviation(values) : .{precision}f}")
         print(f"\t\tSte from values:{standard_error_from_values(values) : .{precision}f}")
@@ -281,10 +280,23 @@ def print_datasets(names : list[str], datasets : tuple[np.ndarray, np.ndarray], 
     for name, (values, errors) in zip(names, datasets):
         print_dataset(name, values, errors, precision)
 
-def print_datasets_mean_and_error(names : list[str], datasets : tuple[np.ndarray, np.ndarray], precision : int = None) -> None:
-    """Prints the mean ± error of many datasets. Intended for usage on results of `read_from_docs_splitting`."""
+def print_mean_and_error(name : str, mn : float, ste : float, precision : int = None) -> None:
+    """Utility method to nicely print a mean ± error. To omit name, pass `None`."""
+    header = "" if name is None else name + " Dataset:"
+    if precision: print(f"{header}{mn : .{precision}f} ±{ste : .{precision}f}".strip())
+    else: print(f"{header} {mn} ± {ste}".strip())
+
+def print_means_and_errors(names : list[str], datasets : list[tuple[np.ndarray, np.ndarray]], precision : int = None) -> None:
+    """Prints the mean ± error of many datasets. Intended for usage on results of `read_from_docs_splitting`. To omit names pass `None`."""
+    if names is None: names = [None] * len(datasets)
     for name, (values, errors) in zip(names, datasets):
-        print(f"{name} Dataset: {mean_and_error(values, errors, precision=precision)}")
+        print_mean_and_error(name, *mean_and_error(values, errors), precision)
+
+def means_and_errors(datasets : list[tuple[np.ndarray, np.ndarray]]) -> list[tuple[float, float]]:
+    """Utility function to return the means and errors of many datasets."""
+    return list(map(lambda dataset: mean_and_error(dataset[0], dataset[1]), datasets))
+
+
 
 ### PLOTTING ###
 

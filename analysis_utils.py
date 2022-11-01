@@ -131,7 +131,7 @@ def unweighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarr
     param_error = np.sqrt(np.diag(param_covariance))
     return optimized_params, param_error
 
-def weighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None, plot : bool = True):
+def weighted_least_squares_fit(model_str : str, syms : list[str], x : np.ndarray, y : np.ndarray, y_err : np.ndarray, initial_parameters : list = None, plot : bool = True) -> tuple[list, list]:
     """
     Performs a weighted least squares fit for the dataset using the specified `model`.
     `syms` should contain a list of strings, each of which is a symbol used in the model, starting with the independent variable.
@@ -162,18 +162,19 @@ def get_predicted(model_str : str, syms : list[str], consts : list[str], const_v
 
 ### MISC UTILS ###
 
-def read_csv_columns(fname : str, datatype=float) -> np.ndarray:
+def read_csv_columns(fname : str, skiprows : int = 0, delimiter : str = ",", datatype=float) -> np.ndarray:
     """Extracts the columns from a rectangular csv file with name `fname` and returns them as a nested np.ndarray."""
     # open file
     with open(fname, "r") as f:
         # read the lines of the file into an array
         lines = f.readlines()
+        lines = lines[skiprows:]
         # iterate through each line, keeping track of its index
         for i, line in enumerate(lines):
             # filter any non-numerical and non-comma characters to avoid parsing errors
             line = ''.join([c for c in line if ord('0') <= ord(c) <= ord('9') or ord(c) == ord(',')])
             # split the line into an array by commas, then convert it to a np array of `type`
-            lines[i] = np.array(list(map(datatype, line.split(','))))
+            lines[i] = np.array(list(map(datatype, line.split(delimiter))))
         # place the lines in an array, then take the transpose to get data columns
         cols = np.array(lines).transpose()
         return cols
@@ -282,7 +283,7 @@ def print_datasets(names : list[str], datasets : tuple[np.ndarray, np.ndarray], 
 
 def print_mean_and_error(name : str, mn : float, ste : float, precision : int = None) -> None:
     """Utility method to nicely print a mean ± error. To omit name, pass `None`."""
-    header = "" if name is None else name + " Dataset:"
+    header = "" if name is None else name + " Dataset Mean ± Error:"
     if precision: print(f"{header}{mn : .{precision}f} ±{ste : .{precision}f}".strip())
     else: print(f"{header} {mn} ± {ste}".strip())
 
